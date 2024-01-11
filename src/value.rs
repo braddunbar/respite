@@ -42,18 +42,6 @@ impl From<i64> for RespValue {
     }
 }
 
-impl From<u64> for RespValue {
-    fn from(value: u64) -> Self {
-        RespValue::Integer(value.try_into().unwrap())
-    }
-}
-
-impl From<u128> for RespValue {
-    fn from(value: u128) -> Self {
-        RespValue::Integer(value.try_into().unwrap())
-    }
-}
-
 impl From<f64> for RespValue {
     fn from(value: f64) -> Self {
         RespValue::Double(value.into())
