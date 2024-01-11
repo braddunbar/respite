@@ -3,12 +3,15 @@
 An async reader for RESP streams.
 
 [![Crates.io][crates-badge]][crates-url]
+[![Docs][docs-badge]][docs-url]
 [![Build Status][ci-badge]][ci-url]
 
 [crates-badge]: https://img.shields.io/crates/v/respite.svg
 [crates-url]: https://crates.io/crates/respite
 [ci-badge]: https://github.com/braddunbar/respite/workflows/CI/badge.svg
 [ci-url]: https://github.com/braddunbar/respite/actions
+[docs-badge]: https://img.shields.io/docsrs/respite/latest.svg
+[docs-url]: https://docs.rs/respite/
 
 ## Usage
 
