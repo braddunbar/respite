@@ -6,6 +6,9 @@ description = "An async reader for RESP streams"
 homepage = "https://github.com/braddunbar/respite"
 license-file = "LICENSE"
 readme = "README.md"
+exclude = [
+  "ci",
+]
 
 [dependencies]
 async-recursion = "1.0.5"
