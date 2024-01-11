@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2021"
 description = "An async reader for RESP streams"
 homepage = "https://github.com/braddunbar/respite"
-license-file = "LICENSE"
+license = "MIT"
 readme = "README.md"
 exclude = [
   ".github",
