@@ -22,6 +22,13 @@ triomphe = "0.1.11"
 version = "1.35.1"
 features = [
   "io-util",
+]
+
+[dev-dependencies.tokio]
+version = "1.35.1"
+features = [
+  "io-util",
   "macros",
   "rt",
+  "rt-multi-thread",
 ]

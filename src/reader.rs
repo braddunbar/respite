@@ -35,6 +35,23 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// Call `f` for each [`RespRequest`] received on this stream.
+    ///
+    /// ```
+    /// # use tokio::runtime::Runtime;
+    /// # use respite::{RespConfig, RespReader, RespRequest};
+    /// # let runtime = Runtime::new().unwrap();
+    /// # runtime.block_on(async {
+    /// let input = "*2\r\n$1\r\na\r\n$1\r\nb\r\n".as_bytes();
+    /// let mut reader = RespReader::new(input, RespConfig::default());
+    /// let mut requests = Vec::new();
+    ///
+    /// reader.requests(|request| { requests.push(request); }).await;
+    ///
+    /// assert!(matches!(requests[0], RespRequest::Argument(_)));
+    /// assert!(matches!(requests[1], RespRequest::Argument(_)));
+    /// assert!(matches!(requests[2], RespRequest::End));
+    /// # });
+    /// ```
     pub async fn requests<F>(&mut self, mut f: F)
     where
         F: FnMut(RespRequest),
@@ -85,6 +102,18 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// Read the next [`RespValue`] from the stream.
+    ///
+    /// ```
+    /// # use tokio::runtime::Runtime;
+    /// # use respite::{RespConfig, RespValue, RespReader};
+    /// # let runtime = Runtime::new().unwrap();
+    /// # runtime.block_on(async {
+    /// let input = "$3\r\nhi!\r\n".as_bytes();
+    /// let mut reader = RespReader::new(input, RespConfig::default());
+    /// let frame = reader.value().await.unwrap();
+    /// assert_eq!(frame, Some(RespValue::String("hi!".into())));
+    /// # });
+    /// ```
     #[async_recursion(?Send)]
     pub async fn value(&mut self) -> Result<Option<RespValue>, RespError> {
         let Some(frame) = self.frame().await? else {
@@ -168,6 +197,18 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// Read the next [`RespFrame`] from the stream.
+    ///
+    /// ```
+    /// # use tokio::runtime::Runtime;
+    /// # use respite::{RespConfig, RespFrame, RespReader};
+    /// # let runtime = Runtime::new().unwrap();
+    /// # runtime.block_on(async {
+    /// let input = "$3\r\nhi!\r\n".as_bytes();
+    /// let mut reader = RespReader::new(input, RespConfig::default());
+    /// let frame = reader.frame().await.unwrap();
+    /// assert_eq!(frame, Some(RespFrame::BlobString("hi!".into())));
+    /// # });
+    /// ```
     pub async fn frame(&mut self) -> Result<Option<RespFrame>, RespError> {
         let Some(byte) = self.peek().await? else {
             return Ok(None);
