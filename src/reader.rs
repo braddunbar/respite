@@ -514,7 +514,7 @@ mod tests {
         }};
     }
 
-    macro_rules! assert_object {
+    macro_rules! assert_value {
         ($input:expr, $expected:tt) => {{
             let (mut writer, local) = duplex(3);
             tokio::spawn(async move {
@@ -527,7 +527,7 @@ mod tests {
         }};
     }
 
-    macro_rules! assert_object_error {
+    macro_rules! assert_value_error {
         ($input:expr, $expected:pat) => {{
             let (mut writer, local) = duplex(3);
             tokio::spawn(async move {
@@ -839,40 +839,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_array_object() -> Result<(), RespError> {
-        assert_object!("*2\r\n$3\r\nfoo\r\n#t\r\n", ["foo", true]);
-        assert_object!("*3\r\n$1\r\nx\r\n$-1\r\n$-1\r\n", ["x", nil, nil]);
+    async fn read_array_value() -> Result<(), RespError> {
+        assert_value!("*2\r\n$3\r\nfoo\r\n#t\r\n", ["foo", true]);
+        assert_value!("*3\r\n$1\r\nx\r\n$-1\r\n$-1\r\n", ["x", nil, nil]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_bignum_object() -> Result<(), RespError> {
-        assert_object!("(123\r\n", (big "123"));
+    async fn read_bignum_value() -> Result<(), RespError> {
+        assert_value!("(123\r\n", (big "123"));
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_simple_string_object() -> Result<(), RespError> {
-        assert_object!("+foo\r\n", "foo");
-        assert_object!("*2\r\n+foo\r\n#t\r\n", ["foo", true]);
+    async fn read_simple_string_value() -> Result<(), RespError> {
+        assert_value!("+foo\r\n", "foo");
+        assert_value!("*2\r\n+foo\r\n#t\r\n", ["foo", true]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_map_object() -> Result<(), RespError> {
-        assert_object!("%2\r\n$3\r\nfoo\r\n:1\r\n$3\r\nbar\r\n:2\r\n", {"foo" => 1, "bar" => 2});
+    async fn read_map_value() -> Result<(), RespError> {
+        assert_value!("%2\r\n$3\r\nfoo\r\n:1\r\n$3\r\nbar\r\n:2\r\n", {"foo" => 1, "bar" => 2});
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_set_object() -> Result<(), RespError> {
-        assert_object!("~2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n", {"foo", "bar"});
+    async fn read_set_value() -> Result<(), RespError> {
+        assert_value!("~2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n", {"foo", "bar"});
         Ok(())
     }
 
     #[tokio::test]
     async fn invalid_map() -> Result<(), RespError> {
-        assert_object_error!(
+        assert_value_error!(
             "%2\r\n$3\r\nfoo\r\n:1\r\n$3\r\nfoo\r\n:2\r\n",
             RespError::InvalidMap
         );
@@ -881,51 +881,51 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_set() -> Result<(), RespError> {
-        assert_object_error!("~2\r\n$3\r\nfoo\r\n$3\r\nfoo\r\n", RespError::InvalidSet);
+        assert_value_error!("~2\r\n$3\r\nfoo\r\n$3\r\nfoo\r\n", RespError::InvalidSet);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_nil_object() -> Result<(), RespError> {
-        assert_object!("*2\r\n_\r\n_\r\n", [nil, nil]);
+    async fn read_nil_value() -> Result<(), RespError> {
+        assert_value!("*2\r\n_\r\n_\r\n", [nil, nil]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_push_object() -> Result<(), RespError> {
-        assert_object!(">2\r\n+one\r\n+two\r\n", [> "one", "two"]);
+    async fn read_push_value() -> Result<(), RespError> {
+        assert_value!(">2\r\n+one\r\n+two\r\n", [> "one", "two"]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_double_object() -> Result<(), RespError> {
-        assert_object!(",2.5\r\n", 2.5f64);
+    async fn read_double_value() -> Result<(), RespError> {
+        assert_value!(",2.5\r\n", 2.5f64);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_verbatim_object() -> Result<(), RespError> {
-        assert_object!("=7\r\ntxt:abc\r\n", (= "txt", "abc"));
-        assert_object!("*2\r\n=7\r\ntxt:abc\r\n:1\r\n", [(= "txt", "abc"), 1i64]);
+    async fn read_verbatim_value() -> Result<(), RespError> {
+        assert_value!("=7\r\ntxt:abc\r\n", (= "txt", "abc"));
+        assert_value!("*2\r\n=7\r\ntxt:abc\r\n:1\r\n", [(= "txt", "abc"), 1i64]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn read_string_object() -> Result<(), RespError> {
-        assert_object!("$-1\r\n", nil);
-        assert_object!("$3\r\nabc\r\n", "abc");
+    async fn read_string_value() -> Result<(), RespError> {
+        assert_value!("$-1\r\n", nil);
+        assert_value!("$3\r\nabc\r\n", "abc");
         Ok(())
     }
 
     #[tokio::test]
     async fn read_error() -> Result<(), RespError> {
-        assert_object!("-ERR foo\r\n", (!"ERR foo"));
+        assert_value!("-ERR foo\r\n", (!"ERR foo"));
         Ok(())
     }
 
     #[tokio::test]
     async fn read_attribute_value() -> Result<(), RespError> {
-        assert_object!("|2\r\n$3\r\nfoo\r\n:1\r\n$3\r\nbar\r\n:2\r\n", {a "foo" => 1, "bar" => 2});
+        assert_value!("|2\r\n$3\r\nfoo\r\n:1\r\n$3\r\nbar\r\n:2\r\n", {a "foo" => 1, "bar" => 2});
         Ok(())
     }
 
