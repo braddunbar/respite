@@ -357,6 +357,9 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     async fn read_blob_error(&mut self) -> Result<RespFrame, RespError> {
         self.require("!").await?;
         let size = self.read_size().await?;
+        if size > self.config.blob_limit() {
+            return Err(RespError::InvalidBlobLength);
+        }
         let value = self.read_exact(size).await?;
         self.require("\r\n").await?;
         Ok(RespFrame::BlobError(value))
@@ -496,11 +499,14 @@ mod tests {
 
     macro_rules! assert_frame_error {
         ($input:expr, $expected:pat) => {{
+            assert_frame_error!($input, $expected, RespConfig::default())
+        }};
+        ($input:expr, $expected:pat, $config:expr) => {{
             let (mut writer, local) = duplex(3);
             tokio::spawn(async move {
-                assert!(writer.write_all($input.as_bytes()).await.is_ok());
+                _ = writer.write_all($input.as_bytes()).await;
             });
-            let mut reader = RespReader::new(local, RespConfig::default());
+            let mut reader = RespReader::new(local, $config);
             let value = reader.frame().await;
             let value = value.expect_err("must be Err(…)");
             assert!(matches!(value, $expected));
@@ -679,6 +685,9 @@ mod tests {
         assert_frame_error!("!invalid\r\ntx\r\n", RespError::InvalidBlobLength);
         assert_frame_error!("!4\r\n", RespError::EndOfInput);
         assert_frame_error!("!4", RespError::EndOfInput);
+        let mut config = RespConfig::default();
+        config.set_blob_limit(5);
+        assert_frame_error!("!10\r\n1234567890\r\n", RespError::InvalidBlobLength, config);
         Ok(())
     }
 
@@ -1054,7 +1063,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_too_long_blob() -> Result<(), RespError> {
+    async fn read_too_long_blob_string() -> Result<(), RespError> {
         let mut config = RespConfig::default();
         config.set_blob_limit(5);
         let mut messages = request_messages!(b"*2\r\n$1\r\nx\r\n$10\r\n1234567890\r\n", config);
