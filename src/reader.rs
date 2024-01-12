@@ -268,6 +268,9 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
             return Ok(RespFrame::Nil);
         }
         let size = self.read_size().await?;
+        if size > self.config.blob_limit() {
+            return Err(RespError::InvalidBlobLength);
+        }
         let value = self.read_exact(size).await?;
         self.require("\r\n").await?;
         Ok(RespFrame::BlobString(value))
@@ -340,6 +343,9 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     async fn read_verbatim(&mut self) -> Result<RespFrame, RespError> {
         self.require("=").await?;
         let size = self.read_size().await?;
+        if size > self.config.blob_limit() {
+            return Err(RespError::InvalidBlobLength);
+        }
         if size < 4 {
             return Err(RespError::InvalidVerbatim);
         }
@@ -588,6 +594,13 @@ mod tests {
         assert_frame_error!("$-1", RespError::EndOfInput);
         assert_frame_error!("$2", RespError::EndOfInput);
         assert_frame_error!("$\r\n\r\n", RespError::InvalidBlobLength);
+        let mut config = RespConfig::default();
+        config.set_blob_limit(5);
+        assert_frame_error!(
+            "$10\r\n1234567890\r\n",
+            RespError::InvalidBlobLength,
+            config
+        );
         Ok(())
     }
 
@@ -677,6 +690,13 @@ mod tests {
         assert_frame_error!("=invalid\r\ntxt x\r\n", RespError::InvalidBlobLength);
         assert_frame_error!("=5\r\ntxt:x", RespError::EndOfInput);
         assert_frame_error!("=5", RespError::EndOfInput);
+        let mut config = RespConfig::default();
+        config.set_blob_limit(5);
+        assert_frame_error!(
+            "=10\r\ntxt:123456\r\n",
+            RespError::InvalidBlobLength,
+            config
+        );
         Ok(())
     }
 
