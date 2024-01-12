@@ -460,6 +460,7 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
 
     /// Read an exact number of bytes.
     async fn read_exact(&mut self, len: usize) -> Result<Bytes, RespError> {
+        self.buffer.reserve(len);
         while self.buffer.len() < len {
             self.read_some().await?;
         }
