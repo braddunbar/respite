@@ -688,7 +688,11 @@ mod tests {
         assert_frame_error!("!4", RespError::EndOfInput);
         let mut config = RespConfig::default();
         config.set_blob_limit(5);
-        assert_frame_error!("!10\r\n1234567890\r\n", RespError::InvalidBlobLength, config);
+        assert_frame_error!(
+            "!10\r\n1234567890\r\n",
+            RespError::InvalidBlobLength,
+            config
+        );
         Ok(())
     }
 
