@@ -31,11 +31,12 @@ impl TryFrom<RespValue> for RespPrimitive {
     type Error = RespError;
 
     fn try_from(value: RespValue) -> Result<Self, Self::Error> {
-        match value {
-            RespValue::Integer(value) => Ok(RespPrimitive::Integer(value)),
-            RespValue::Nil => Ok(RespPrimitive::Nil),
-            RespValue::String(value) => Ok(RespPrimitive::String(value)),
-            _ => Err(RespError::RespPrimitive),
-        }
+        use RespPrimitive::*;
+        Ok(match value {
+            RespValue::Integer(value) => Integer(value),
+            RespValue::Nil => RespPrimitive::Nil,
+            RespValue::String(value) => String(value),
+            _ => return Err(RespError::RespPrimitive),
+        })
     }
 }
