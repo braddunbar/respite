@@ -2,6 +2,7 @@ use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, Splitter};
 use async_recursion::async_recursion;
 use bytes::{Buf, Bytes, BytesMut};
 use std::{
+    cmp,
     collections::{BTreeMap, BTreeSet},
     marker::Unpin,
 };
@@ -446,7 +447,8 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     async fn read_line(&mut self) -> Result<Bytes, RespError> {
         let mut from = 0;
         let slice = loop {
-            let index = self.buffer[from..].iter().position(|&b| b == b'\r');
+            let to = cmp::min(self.config.inline_limit(), self.buffer.len());
+            let index = self.buffer[from..to].iter().position(|&b| b == b'\r');
 
             if let Some(index) = index {
                 break self.buffer.split_to(from + index);
@@ -488,15 +490,10 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use std::collections::VecDeque;
-    use tokio::io::{duplex, AsyncWriteExt};
 
     macro_rules! assert_frame {
         ($input:expr, $expected:expr) => {{
-            let (mut writer, local) = duplex(3);
-            tokio::spawn(async move {
-                assert!(writer.write_all($input.as_bytes()).await.is_ok());
-            });
-            let mut reader = RespReader::new(local, RespConfig::default());
+            let mut reader = RespReader::new($input.as_bytes(), RespConfig::default());
             let value = reader.frame().await;
             let value = value.expect("must be Ok(…)");
             let value = value.expect("mut be Some(_)");
@@ -509,11 +506,7 @@ mod tests {
             assert_frame_error!($input, $expected, RespConfig::default())
         }};
         ($input:expr, $expected:pat, $config:expr) => {{
-            let (mut writer, local) = duplex(3);
-            tokio::spawn(async move {
-                _ = writer.write_all($input.as_bytes()).await;
-            });
-            let mut reader = RespReader::new(local, $config);
+            let mut reader = RespReader::new($input.as_bytes(), $config);
             let value = reader.frame().await;
             let value = value.expect_err("must be Err(…)");
             assert!(matches!(value, $expected));
@@ -522,11 +515,7 @@ mod tests {
 
     macro_rules! assert_value {
         ($input:expr, $expected:tt) => {{
-            let (mut writer, local) = duplex(3);
-            tokio::spawn(async move {
-                assert!(writer.write_all($input.as_bytes()).await.is_ok());
-            });
-            let mut reader = RespReader::new(local, RespConfig::default());
+            let mut reader = RespReader::new($input.as_bytes(), RespConfig::default());
             let value = reader.value().await;
             let value = value.expect("must be Ok(…)");
             assert_eq!(value, Some(resp! { $expected }));
@@ -535,11 +524,7 @@ mod tests {
 
     macro_rules! assert_value_error {
         ($input:expr, $expected:pat) => {{
-            let (mut writer, local) = duplex(3);
-            tokio::spawn(async move {
-                assert!(writer.write_all($input.as_bytes()).await.is_ok());
-            });
-            let mut reader = RespReader::new(local, RespConfig::default());
+            let mut reader = RespReader::new($input.as_bytes(), RespConfig::default());
             let value = reader.value().await;
             let value = value.expect_err("must be Err(…)");
             assert!(matches!(value, $expected));
@@ -548,11 +533,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_none() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(3);
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"+OK\r\n").await.is_ok());
-        });
-        let mut reader = RespReader::new(local, RespConfig::default());
+        let mut reader = RespReader::new("+OK\r\n".as_bytes(), RespConfig::default());
         assert_eq!(
             reader.frame().await.unwrap(),
             Some(RespFrame::SimpleString("OK".into()))
@@ -718,11 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_size() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(3);
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"1234\r\n").await.is_ok());
-        });
-        let mut reader = RespReader::new(local, RespConfig::default());
+        let mut reader = RespReader::new("1234\r\n".as_bytes(), RespConfig::default());
         assert!(matches!(reader.read_size().await, Ok(1234)));
 
         Ok(())
@@ -730,11 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_size_invalid() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(3);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"invalid\r\n").await.is_ok());
-        });
+        let mut reader = RespReader::new("invalid\r\n".as_bytes(), RespConfig::default());
         assert!(matches!(
             reader.read_size().await,
             Err(RespError::InvalidBlobLength)
@@ -745,9 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_some_end_of_input() -> Result<(), RespError> {
-        let (writer, local) = duplex(10);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        drop(writer);
+        let mut reader = RespReader::new("".as_bytes(), RespConfig::default());
         assert!(matches!(
             reader.read_some().await,
             Err(RespError::EndOfInput)
@@ -757,11 +728,7 @@ mod tests {
 
     #[tokio::test]
     async fn pop() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcde").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcde".as_bytes(), RespConfig::default());
         assert!(matches!(reader.pop().await, Ok(b'a')));
         assert!(matches!(reader.pop().await, Ok(b'b')));
         assert!(matches!(reader.pop().await, Ok(b'c')));
@@ -774,11 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn require() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcf").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcf".as_bytes(), RespConfig::default());
         assert!(matches!(reader.require("ab").await, Ok(())));
         assert!(matches!(
             reader.require("cd").await,
@@ -790,11 +753,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_line() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcdefg\r\n").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcdefg\r\n".as_bytes(), RespConfig::default());
         assert_eq!(
             reader.read_line().await.unwrap(),
             Bytes::from_static(b"abcdefg")
@@ -805,11 +764,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_line_malformed_crlf() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcdefg\rxxxxx").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcdefg\rxxxxx".as_bytes(), RespConfig::default());
         assert!(matches!(
             reader.read_line().await,
             Err(RespError::Unexpected(b'\n', b'x'))
@@ -820,11 +775,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_exact() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcdefgxxxxxxxxxxxxxx").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcdefgxxxxxxxxxxxxxx".as_bytes(), RespConfig::default());
         assert_eq!(
             reader.read_exact(7).await.unwrap(),
             Bytes::from_static(b"abcdefg")
@@ -835,11 +786,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_exact_end_of_input() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"abcd").await.is_ok());
-        });
+        let mut reader = RespReader::new("abcd".as_bytes(), RespConfig::default());
         assert!(matches!(
             reader.read_exact(7).await,
             Err(RespError::EndOfInput)
@@ -850,11 +797,7 @@ mod tests {
 
     #[tokio::test]
     async fn peek() -> Result<(), RespError> {
-        let (mut writer, local) = duplex(2);
-        let mut reader = RespReader::new(local, RespConfig::default());
-        tokio::spawn(async move {
-            assert!(writer.write_all(b"a").await.is_ok());
-        });
+        let mut reader = RespReader::new("a".as_bytes(), RespConfig::default());
         assert_eq!(reader.peek().await.unwrap(), Some(b'a'));
         assert_eq!(reader.pop().await.unwrap(), b'a');
         assert_eq!(reader.peek().await.unwrap(), None);
@@ -958,11 +901,7 @@ mod tests {
             request_messages!($input, RespConfig::default())
         }};
         ($input:expr, $config:expr) => {{
-            let (mut writer, local) = duplex(3);
-            tokio::spawn(async move {
-                assert!(writer.write_all($input).await.is_ok());
-            });
-            let mut reader = RespReader::new(local, $config);
+            let mut reader = RespReader::new(&$input[..], $config);
             let mut messages = VecDeque::new();
             reader.requests(|message| messages.push_back(message)).await;
             messages
