@@ -2,6 +2,7 @@ use thiserror::Error;
 
 /// An error encountered while reading a RESP stream.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RespError {
     /// Reached the end of the stream unexpectedly
     #[error("unexpected end of input")]
@@ -38,6 +39,14 @@ pub enum RespError {
     /// Error reading from the stream.
     #[error("io error")]
     IO(#[from] std::io::Error),
+
+    /// Simple frame cannot contain a newline.
+    #[error("newline is not allowed in this frame")]
+    Newline,
+
+    /// Unsupported in current version.
+    #[error("unsupported in the current version")]
+    Version,
 
     /// Expected a primitive, but got a complex value
     #[error("map keys and set values must be primitives")]

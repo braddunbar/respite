@@ -126,7 +126,7 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
             Array(size) => {
                 let mut array = Vec::new();
                 for _ in 0..size {
-                    array.push(self.require_frame().await?);
+                    array.push(self.require_value().await?);
                 }
                 RespValue::Array(array)
             }
@@ -136,8 +136,8 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
                 #[allow(clippy::mutable_key_type)]
                 let mut map = BTreeMap::new();
                 for _ in 0..size {
-                    let key = self.require_frame().await?.try_into()?;
-                    let value = self.require_frame().await?;
+                    let key = self.require_value().await?.try_into()?;
+                    let value = self.require_value().await?;
                     if map.insert(key, value).is_some() {
                         return Err(RespError::InvalidMap);
                     }
@@ -157,8 +157,8 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
                 #[allow(clippy::mutable_key_type)]
                 let mut map = BTreeMap::new();
                 for _ in 0..size {
-                    let key = self.require_frame().await?.try_into()?;
-                    let value = self.require_frame().await?;
+                    let key = self.require_value().await?.try_into()?;
+                    let value = self.require_value().await?;
                     if map.insert(key, value).is_some() {
                         return Err(RespError::InvalidMap);
                     }
@@ -169,7 +169,7 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
             Push(size) => {
                 let mut push = Vec::new();
                 for _ in 0..size {
-                    push.push(self.require_frame().await?);
+                    push.push(self.require_value().await?);
                 }
                 RespValue::Push(push)
             }
@@ -179,7 +179,7 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
                 #[allow(clippy::mutable_key_type)]
                 let mut set = BTreeSet::new();
                 for _ in 0..size {
-                    let value = self.require_frame().await?.try_into()?;
+                    let value = self.require_value().await?.try_into()?;
                     if !set.insert(value) {
                         return Err(RespError::InvalidSet);
                     }
@@ -193,7 +193,7 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// Require one [`RespFrame`] from the stream.
-    async fn require_frame(&mut self) -> Result<RespValue, RespError> {
+    async fn require_value(&mut self) -> Result<RespValue, RespError> {
         self.value().await?.ok_or(RespError::EndOfInput)
     }
 

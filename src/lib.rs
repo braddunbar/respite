@@ -113,6 +113,8 @@ mod reader;
 mod request;
 mod splitter;
 mod value;
+mod version;
+mod writer;
 
 pub use config::RespConfig;
 pub use error::RespError;
@@ -122,3 +124,5 @@ pub use reader::RespReader;
 pub use request::RespRequest;
 use splitter::Splitter;
 pub use value::RespValue;
+pub use version::RespVersion;
+pub use writer::RespWriter;
