@@ -1,6 +1,8 @@
 # Respite
 
-An async reader for RESP streams.
+Some tools for reading and writing [RESP][RESP] streams.
+
+[RESP]: https://redis.io/docs/reference/protocol-spec/
 
 [![Crates.io][crates-badge]][crates-url]
 [![Docs][docs-badge]][docs-url]
@@ -25,5 +27,5 @@ respite = "*"
 Next, add this to your crate:
 
 ```rust
-use respite::RespReader;
+use respite::{RespReader, RespWriter, RespVersion};
 ```
