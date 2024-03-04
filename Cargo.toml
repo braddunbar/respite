@@ -15,17 +15,17 @@ exclude = [
 async-recursion = "1.0.5"
 bytes = "1.5.0"
 ordered-float = "4.2.0"
-thiserror = "1.0.56"
+thiserror = "1.0.57"
 triomphe = "0.1.11"
 
 [dependencies.tokio]
-version = "1.35.1"
+version = "1.36.0"
 features = [
   "io-util",
 ]
 
 [dev-dependencies.tokio]
-version = "1.35.1"
+version = "1.36.0"
 features = [
   "io-util",
   "macros",
