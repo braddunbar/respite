@@ -6,13 +6,13 @@ description = "An async reader for RESP streams"
 homepage = "https://github.com/braddunbar/respite"
 license = "MIT"
 readme = "README.md"
+rust-version = "1.77.0"
 exclude = [
   ".github",
   "ci",
 ]
 
 [dependencies]
-async-recursion = "1.0.5"
 bytes = "1.5.0"
 ordered-float = "4.2.0"
 thiserror = "1.0.57"
