@@ -45,6 +45,12 @@ impl<Inner: AsyncWrite + Unpin> RespWriter<Inner> {
         Ok(())
     }
 
+    /// Shut down the inner writer.
+    pub async fn shutdown(&mut self) -> Result<(), RespError> {
+        self.inner.shutdown().await?;
+        Ok(())
+    }
+
     /// Write an array frame.
     pub async fn write_array(&mut self, len: usize) -> Result<(), RespError> {
         write_fmt!(self, "*{}\r\n", len);
