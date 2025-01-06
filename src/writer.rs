@@ -166,7 +166,7 @@ impl<Inner: AsyncWrite + Unpin> RespWriter<Inner> {
 
     /// Write a simple error frame.
     pub async fn write_simple_error(&mut self, value: &[u8]) -> Result<(), RespError> {
-        if value.contains(&b'\n') {
+        if value.iter().any(|&b| b == b'\r' || b == b'\n') {
             return Err(RespError::Newline);
         }
         write_all!(self, b"-");
@@ -177,7 +177,7 @@ impl<Inner: AsyncWrite + Unpin> RespWriter<Inner> {
 
     /// Write a simple string frame.
     pub async fn write_simple_string(&mut self, value: &[u8]) -> Result<(), RespError> {
-        if value.contains(&b'\n') {
+        if value.iter().any(|&b| b == b'\r' || b == b'\n') {
             return Err(RespError::Newline);
         }
         write_all!(self, b"+");
@@ -373,6 +373,8 @@ mod tests {
         assert_write3!(write_simple_error("ERR x".as_bytes()), b"-ERR x\r\n");
         assert_error2!(write_simple_error("ERR\nx".as_bytes()), RespError::Newline);
         assert_error3!(write_simple_error("ERR\nx".as_bytes()), RespError::Newline);
+        assert_error2!(write_simple_error("ERR\rx".as_bytes()), RespError::Newline);
+        assert_error3!(write_simple_error("ERR\rx".as_bytes()), RespError::Newline);
         Ok(())
     }
 
@@ -384,8 +386,16 @@ mod tests {
             write_simple_string("new\nline".as_bytes()),
             RespError::Newline
         );
+        assert_error2!(
+            write_simple_string("new\rline".as_bytes()),
+            RespError::Newline
+        );
         assert_error3!(
             write_simple_string("new\nline".as_bytes()),
+            RespError::Newline
+        );
+        assert_error3!(
+            write_simple_string("new\rline".as_bytes()),
             RespError::Newline
         );
         Ok(())
