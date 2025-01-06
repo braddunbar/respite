@@ -39,6 +39,19 @@ impl<Inner: AsyncWrite + Unpin> RespWriter<Inner> {
         }
     }
 
+    /// Write an inline command.
+    pub async fn write_inline(&mut self, value: &[u8]) -> Result<(), RespError> {
+        if value.first() == Some(&b'*') {
+            return Err(RespError::InvalidInline);
+        }
+        if value.iter().any(|&b| b == b'\r' || b == b'\n') {
+            return Err(RespError::Newline);
+        }
+        write_all!(self, value);
+        write_all!(self, b"\r\n");
+        Ok(())
+    }
+
     /// Flush the inner writer.
     pub async fn flush(&mut self) -> Result<(), RespError> {
         self.inner.flush().await?;
@@ -265,6 +278,19 @@ mod tests {
         ($f:ident ( $($arg:expr),* ), $expected:pat) => {{
             assert_error!($f($($arg),*), $expected, RespVersion::V3)
         }};
+    }
+
+    #[tokio::test]
+    async fn write_inline() -> Result<(), RespError> {
+        assert_write2!(write_inline("get x".as_bytes()), b"get x\r\n");
+        assert_write3!(write_inline("get x".as_bytes()), b"get x\r\n");
+        assert_error2!(write_inline("get\nx".as_bytes()), RespError::Newline);
+        assert_error3!(write_inline("get\nx".as_bytes()), RespError::Newline);
+        assert_error2!(write_inline("get\rx".as_bytes()), RespError::Newline);
+        assert_error3!(write_inline("get\rx".as_bytes()), RespError::Newline);
+        assert_error2!(write_inline("*get x".as_bytes()), RespError::InvalidInline);
+        assert_error3!(write_inline("*get x".as_bytes()), RespError::InvalidInline);
+        Ok(())
     }
 
     #[tokio::test]

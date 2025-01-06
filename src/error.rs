@@ -63,4 +63,8 @@ pub enum RespError {
     /// Unknown RESP type
     #[error("unknown resp type: {:?}", char::from(*.0))]
     UnknownType(u8),
+
+    /// Invalid inline command
+    #[error("invalid inline command")]
+    InvalidInline,
 }
