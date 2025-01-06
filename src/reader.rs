@@ -591,8 +591,15 @@ mod tests {
     #[tokio::test]
     async fn double_frame() -> Result<(), RespError> {
         assert_frame!(",5.4\r\n", RespFrame::Double(5.4f64.into()));
+        assert_frame!(",5.4e1\r\n", RespFrame::Double(54f64.into()));
+        assert_frame!(",5.4e+1\r\n", RespFrame::Double(54f64.into()));
+        assert_frame!(",5.4e-1\r\n", RespFrame::Double(0.54f64.into()));
+        assert_frame!(",5.4E1\r\n", RespFrame::Double(54f64.into()));
+        assert_frame!(",5.4E+1\r\n", RespFrame::Double(54f64.into()));
+        assert_frame!(",5.4E-1\r\n", RespFrame::Double(0.54f64.into()));
         assert_frame!(",inf\r\n", RespFrame::Double(f64::INFINITY.into()));
         assert_frame!(",-inf\r\n", RespFrame::Double(f64::NEG_INFINITY.into()));
+        assert_frame!(",nan\r\n", RespFrame::Double(f64::NAN.into()));
         assert_frame_error!(",invalid\r\n", RespError::InvalidDouble);
         assert_frame_error!(",5.4", RespError::EndOfInput);
         Ok(())
