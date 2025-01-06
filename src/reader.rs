@@ -236,6 +236,10 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     /// Read an array.
     async fn read_array(&mut self) -> Result<RespFrame, RespError> {
         self.require("*").await?;
+        if self.peek().await? == Some(b'-') {
+            self.require("-1\r\n").await?;
+            return Ok(RespFrame::Nil);
+        }
         let size = self.read_size().await?;
         Ok(RespFrame::Array(size))
     }
@@ -544,6 +548,7 @@ mod tests {
     async fn array_frame() -> Result<(), RespError> {
         assert_frame!("*0\r\n", RespFrame::Array(0));
         assert_frame!("*1\r\n", RespFrame::Array(1));
+        assert_frame!("*-1\r\n", RespFrame::Nil);
         assert_frame_error!("*\r\n", RespError::InvalidBlobLength);
         assert_frame_error!("*1", RespError::EndOfInput);
         Ok(())
