@@ -1,6 +1,6 @@
 [package]
 name = "respite"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 description = "An async reader for RESP streams"
 repository = "https://github.com/braddunbar/respite"
