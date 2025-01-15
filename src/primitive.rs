@@ -2,7 +2,7 @@ use crate::{RespError, RespValue};
 use bytes::Bytes;
 
 /// A primitive value that can be used as the key for a map or set.
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RespPrimitive {
     Integer(i64),
     Nil,

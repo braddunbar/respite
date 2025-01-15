@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 ///
 /// These values are meant to be used for testing, and thus can be hashed and compared. However,
 /// this also makes them far less performant than reading frames directly.
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RespValue {
     Attribute(BTreeMap<RespPrimitive, RespValue>),
     Array(Vec<RespValue>),
