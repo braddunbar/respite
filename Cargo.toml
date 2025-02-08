@@ -14,9 +14,10 @@ exclude = [
 
 [dependencies]
 bytes = "1"
-ordered-float = "4.2.0"
-thiserror = "1.0.57"
-triomphe = "0.1.11"
+futures = "0.3"
+ordered-float = "4"
+thiserror = "1"
+triomphe = "0.1"
 
 [dependencies.tokio]
 version = "1"
@@ -31,4 +32,5 @@ features = [
   "macros",
   "rt",
   "rt-multi-thread",
+  "time",
 ]

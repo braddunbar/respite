@@ -1,5 +1,6 @@
 use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, Splitter};
 use bytes::{Buf, Bytes, BytesMut};
+use futures::{stream::unfold, Stream};
 use std::{
     cmp,
     collections::{BTreeMap, BTreeSet},
@@ -190,6 +191,14 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
         Ok(Some(result))
     }
 
+    /// A cancel-safe [`Stream`] of `RespValue`.
+    pub fn values(self) -> impl Stream<Item = Result<RespValue, RespError>> {
+        unfold(self, |mut reader| async move {
+            let item = reader.value().await.transpose()?;
+            Some((item, reader))
+        })
+    }
+
     /// Require one [`RespFrame`] from the stream.
     async fn require_value(&mut self) -> Result<RespValue, RespError> {
         self.value().await?.ok_or(RespError::EndOfInput)
@@ -231,6 +240,14 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
             b'|' => self.read_attribute().await?,
             c => return Err(RespError::UnknownType(c)),
         }))
+    }
+
+    /// A cancel-safe [`Stream`] of `RespFrame`.
+    pub fn frames(self) -> impl Stream<Item = Result<RespFrame, RespError>> {
+        unfold(self, |mut reader| async move {
+            let item = reader.frame().await.transpose()?;
+            Some((item, reader))
+        })
     }
 
     /// Read an array.
@@ -491,7 +508,9 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use std::collections::VecDeque;
+    use futures::StreamExt;
+    use std::{collections::VecDeque, time::Duration};
+    use tokio::{io::AsyncWriteExt, time::timeout};
 
     macro_rules! assert_frame {
         ($input:expr, $expected:expr) => {{
@@ -1054,6 +1073,40 @@ mod tests {
         let mut messages = request_messages!(b"1234567890\r\n", config);
         assert_error!(messages, RespError::TooBigInline);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn values_cancel_safety() -> Result<(), RespError> {
+        let (reader, mut writer) = tokio::io::simplex(100000);
+        let reader = RespReader::new(reader, RespConfig::default());
+        let values = reader.values();
+        tokio::pin!(values);
+        let duration = Duration::from_millis(5);
+        writer.write_all(b"*2\r\n:1\r\n").await?;
+        assert!(timeout(duration, values.next()).await.is_err());
+        writer.write_all(b":2\r\n").await?;
+        assert_eq!(
+            values.next().await.unwrap().unwrap(),
+            RespValue::Array(vec![RespValue::Integer(1), RespValue::Integer(2)])
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn frames_cancel_safety() -> Result<(), RespError> {
+        let (reader, mut writer) = tokio::io::simplex(100000);
+        let reader = RespReader::new(reader, RespConfig::default());
+        let frames = reader.frames();
+        tokio::pin!(frames);
+        let duration = Duration::from_millis(5);
+        writer.write_all(b":1234").await?;
+        assert!(timeout(duration, frames.next()).await.is_err());
+        writer.write_all(b"5678\r\n").await?;
+        assert_eq!(
+            frames.next().await.unwrap().unwrap(),
+            RespFrame::Integer(12345678)
+        );
         Ok(())
     }
 }
