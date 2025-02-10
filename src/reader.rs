@@ -1,6 +1,6 @@
 use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, Splitter};
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{stream::unfold, Stream};
+use futures::stream::{unfold, BoxStream, StreamExt};
 use std::{
     cmp,
     collections::{BTreeMap, BTreeSet},
@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 /// * Read values, possibly made up of multiple frames
 /// * Read requests like a Redis server
 #[derive(Debug)]
-pub struct RespReader<Inner: AsyncRead + Unpin> {
+pub struct RespReader<Inner: AsyncRead + Unpin + Send + 'static> {
     /// The input buffer.
     buffer: BytesMut,
 
@@ -25,7 +25,7 @@ pub struct RespReader<Inner: AsyncRead + Unpin> {
     inner: Inner,
 }
 
-impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
+impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
     /// Create a new [`RespReader`] from a byte stream and a [`RespConfig`].
     pub fn new(inner: Inner, config: RespConfig) -> Self {
         Self {
@@ -192,11 +192,13 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// A cancel-safe [`Stream`] of `RespValue`.
-    pub fn values(self) -> impl Stream<Item = Result<RespValue, RespError>> {
+    pub fn values(self) -> BoxStream<'static, Result<RespValue, RespError>> {
         unfold(self, |mut reader| async move {
             let item = reader.value().await.transpose()?;
             Some((item, reader))
         })
+        .fuse()
+        .boxed()
     }
 
     /// Require one [`RespFrame`] from the stream.
@@ -243,11 +245,13 @@ impl<Inner: AsyncRead + Unpin> RespReader<Inner> {
     }
 
     /// A cancel-safe [`Stream`] of `RespFrame`.
-    pub fn frames(self) -> impl Stream<Item = Result<RespFrame, RespError>> {
+    pub fn frames(self) -> BoxStream<'static, Result<RespFrame, RespError>> {
         unfold(self, |mut reader| async move {
             let item = reader.frame().await.transpose()?;
             Some((item, reader))
         })
+        .fuse()
+        .boxed()
     }
 
     /// Read an array.
