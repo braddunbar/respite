@@ -1,12 +1,12 @@
 [package]
 name = "respite"
 version = "0.3.9"
-edition = "2021"
+edition = "2024"
 description = "An async reader for RESP streams"
 repository = "https://github.com/braddunbar/respite"
 license = "MIT"
 readme = "README.md"
-rust-version = "1.77.0"
+rust-version = "1.85.0"
 exclude = [
   ".github",
   "ci",
