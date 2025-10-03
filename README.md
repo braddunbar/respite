@@ -2,7 +2,7 @@
 
 Some tools for reading and writing [RESP][RESP] streams.
 
-[RESP]: https://redis.io/docs/reference/protocol-spec/
+[RESP]: https://redis.io/docs/latest/develop/reference/protocol-spec/
 
 [![Crates.io][crates-badge]][crates-url]
 [![Docs][docs-badge]][docs-url]
