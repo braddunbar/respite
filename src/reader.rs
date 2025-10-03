@@ -1,6 +1,6 @@
 use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, Splitter};
 use bytes::{Buf, Bytes, BytesMut};
-use futures::stream::{unfold, BoxStream, StreamExt};
+use futures::stream::{BoxStream, StreamExt, unfold};
 use std::{
     cmp,
     collections::{BTreeMap, BTreeSet},
@@ -527,9 +527,7 @@ mod tests {
     }
 
     macro_rules! assert_frame_error {
-        ($input:expr, $expected:pat) => {{
-            assert_frame_error!($input, $expected, RespConfig::default())
-        }};
+        ($input:expr, $expected:pat) => {{ assert_frame_error!($input, $expected, RespConfig::default()) }};
         ($input:expr, $expected:pat, $config:expr) => {{
             let mut reader = RespReader::new($input.as_bytes(), $config);
             let value = reader.frame().await;
@@ -930,9 +928,7 @@ mod tests {
     }
 
     macro_rules! request_messages {
-        ($input:expr) => {{
-            request_messages!($input, RespConfig::default())
-        }};
+        ($input:expr) => {{ request_messages!($input, RespConfig::default()) }};
         ($input:expr, $config:expr) => {{
             let mut reader = RespReader::new(&$input[..], $config);
             let mut messages = VecDeque::new();

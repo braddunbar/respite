@@ -25,9 +25,7 @@ macro_rules! resp_primitive {
         use $crate::RespPrimitive;
         RespPrimitive::Nil
     }};
-    ($x:tt) => {{
-        $x.into()
-    }};
+    ($x:tt) => {{ $x.into() }};
 }
 
 /// Conveniently create a [`RespValue`]
