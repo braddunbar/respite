@@ -8,6 +8,22 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+/// The state of a reader when reading a stream of [`RespRequest`].
+#[derive(Debug)]
+enum RequestState {
+    /// Parsing arguments.
+    Args(usize),
+
+    /// No more requests are in the stream.
+    Done,
+
+    /// The initial state, waiting for input.
+    Init,
+
+    /// Splitting an inline request.
+    Splitting,
+}
+
 /// A wrapper for [`AsyncRead`] to allow reading a RESP stream, mainly in three ways.
 ///
 /// * Read each frame
@@ -23,6 +39,12 @@ pub struct RespReader<Inner: AsyncRead + Unpin + Send + 'static> {
 
     /// The inner `AsyncRead`.
     inner: Inner,
+
+    /// A `Splitter` for splitting arguments.
+    splitter: Splitter,
+
+    /// The current request state.
+    request_state: RequestState,
 }
 
 impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
@@ -32,47 +54,34 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
             buffer: BytesMut::default(),
             config,
             inner,
+            splitter: Splitter::default(),
+            request_state: RequestState::Init,
         }
     }
 
-    /// Call `f` for each [`RespRequest`] received on this stream.
-    ///
-    /// ```
-    /// # use tokio::runtime::Runtime;
-    /// # use respite::{RespConfig, RespReader, RespRequest};
-    /// # let runtime = Runtime::new().unwrap();
-    /// # runtime.block_on(async {
-    /// let input = "*2\r\n$1\r\na\r\n$1\r\nb\r\n".as_bytes();
-    /// let mut reader = RespReader::new(input, RespConfig::default());
-    /// let mut requests = Vec::new();
-    ///
-    /// reader.requests(|request| { requests.push(request); }).await;
-    ///
-    /// assert!(matches!(requests[0], RespRequest::Argument(_)));
-    /// assert!(matches!(requests[1], RespRequest::Argument(_)));
-    /// assert!(matches!(requests[2], RespRequest::End));
-    /// # });
-    /// ```
-    pub async fn requests<F>(&mut self, mut f: F)
-    where
-        F: FnMut(RespRequest),
-    {
-        if let Err(error) = self.requests_inner(&mut f).await {
-            f(RespRequest::Error(error));
-        }
+    /// A cancel-safe [`Stream`] of [`RespRequest`].
+    pub fn requests(self) -> BoxStream<'static, RespRequest> {
+        unfold(Some(self), |reader| async move {
+            let mut reader = reader?;
+            match reader.request().await.transpose()? {
+                Ok(request) => Some((request, Some(reader))),
+                Err(error) => Some((RespRequest::Error(error), None)),
+            }
+        })
+        .fuse()
+        .boxed()
     }
 
-    async fn requests_inner<F>(&mut self, f: &mut F) -> Result<(), RespError>
-    where
-        F: FnMut(RespRequest),
-    {
-        let mut splitter = Splitter::default();
-
-        while let Some(byte) = self.peek().await? {
-            if byte == b'*' {
-                self.require("*").await?;
-                let size = self.read_size().await?;
-                for _ in 0..size {
+    /// Read the next [`RespRequest`] from the stream.
+    pub async fn request(&mut self) -> Result<Option<RespRequest>, RespError> {
+        loop {
+            use RequestState::*;
+            match self.request_state {
+                Args(0) => {
+                    self.request_state = Init;
+                    return Ok(Some(RespRequest::End));
+                }
+                Args(c) => {
                     self.require("$").await?;
                     let size = self.read_size().await?;
 
@@ -82,24 +91,41 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
 
                     let result = self.read_exact(size).await?;
                     self.require("\r\n").await?;
-                    f(result.into());
+                    self.request_state = Args(c - 1);
+                    return Ok(Some(result.into()));
                 }
-                f(RespRequest::End);
-                continue;
-            }
+                Init => {
+                    let Some(byte) = self.peek().await? else {
+                        self.request_state = Done;
+                        return Ok(None);
+                    };
 
-            let line = self.read_line().await?;
-            if splitter.split(&line[..]) {
-                while let Some(argument) = splitter.next() {
-                    f(argument.into());
+                    if byte == b'*' {
+                        self.require("*").await?;
+                        self.request_state = Args(self.read_size().await?);
+                        continue;
+                    }
+
+                    let line = self.read_line().await?;
+                    if self.splitter.split(&line[..]) {
+                        self.request_state = Splitting;
+                        continue;
+                    }
+
+                    return Ok(Some(RespRequest::InvalidArgument));
                 }
-                f(RespRequest::End);
-            } else {
-                f(RespRequest::InvalidArgument);
+                Splitting => {
+                    if let Some(argument) = self.splitter.next() {
+                        return Ok(Some(argument.into()));
+                    }
+                    self.request_state = Init;
+                    return Ok(Some(RespRequest::End));
+                }
+                Done => {
+                    return Ok(None);
+                }
             }
         }
-
-        Ok(())
     }
 
     /// Read the next [`RespValue`] from the stream.
@@ -513,7 +539,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use futures::StreamExt;
-    use std::{collections::VecDeque, time::Duration};
+    use std::time::Duration;
     use tokio::{io::AsyncWriteExt, time::timeout};
 
     macro_rules! assert_frame {
@@ -927,130 +953,123 @@ mod tests {
         Ok(())
     }
 
-    macro_rules! request_messages {
-        ($input:expr) => {{ request_messages!($input, RespConfig::default()) }};
-        ($input:expr, $config:expr) => {{
-            let mut reader = RespReader::new(&$input[..], $config);
-            let mut messages = VecDeque::new();
-            reader.requests(|message| messages.push_back(message)).await;
-            messages
-        }};
-    }
-
-    macro_rules! assert_none {
-        ($messages:expr) => {
-            let value = $messages.pop_front();
-            if !value.is_none() {
-                panic!("expected none, got: {:?}", value);
-            }
+    macro_rules! assert_requests {
+        ($config:expr, $input:expr, $($expected:tt),*) => {
+            let reader = RespReader::new(&$input[..], $config);
+            let mut stream = reader.requests();
+            $(resp_request!(stream, $expected);)*
+            assert!(stream.next().await.is_none());
+            assert!(stream.next().await.is_none());
         };
     }
 
-    macro_rules! assert_argument {
-        ($messages:expr, $expected:expr) => {
-            let value = $messages.pop_front().unwrap();
-            match value {
-                RespRequest::Argument(argument) => {
-                    assert_eq!(&argument[..], &$expected[..]);
-                }
-                _ => panic!(
-                    "expected {:?}, got {:?}",
-                    RespRequest::Argument(Bytes::from_static($expected)),
+    macro_rules! resp_request {
+        ($stream:expr, (error $error:pat)) => {
+            let value = $stream.next().await;
+            let Some(value) = value else {
+                panic!("expected end but got none");
+            };
+            let RespRequest::Error(error) = value else {
+                panic!("expected error but got {:?}", value);
+            };
+            assert!(matches!(error, $error));
+        };
+        ($stream:expr, invalid) => {
+            let value = $stream.next().await;
+            let Some(value) = value else {
+                panic!("expected end but got none");
+            };
+            assert!(matches!(value, RespRequest::InvalidArgument));
+        };
+        ($stream:expr, end) => {
+            let value = $stream.next().await;
+            let Some(value) = value else {
+                panic!("expected end but got none");
+            };
+            assert!(matches!(value, RespRequest::End));
+        };
+        ($stream:expr, $argument:expr) => {
+            let value = $stream.next().await;
+            let Some(value) = value else {
+                panic!("expected {:?} but got none", $argument.escape_ascii());
+            };
+            let RespRequest::Argument(value) = value else {
+                panic!(
+                    "expected {:?} but got {:?}",
+                    $argument.escape_ascii(),
                     value
-                ),
-            }
-        };
-    }
-
-    macro_rules! assert_ready {
-        ($messages:expr) => {
-            let value = $messages.pop_front().unwrap();
-            match value {
-                RespRequest::End => {}
-                _ => panic!("expected {:?}, got: {:?}", RespRequest::End, value),
-            }
-        };
-    }
-
-    macro_rules! assert_invalid_argument {
-        ($messages:expr) => {
-            let value = $messages.pop_front().unwrap();
-            match value {
-                RespRequest::InvalidArgument => {}
-                _ => panic!(
-                    "expected {:?}, got: {:?}",
-                    RespRequest::InvalidArgument,
-                    value
-                ),
-            }
-        };
-    }
-
-    macro_rules! assert_error {
-        ($messages:expr, $expected:pat) => {
-            let value = $messages.pop_front().unwrap();
-            assert!(matches!(value, RespRequest::Error($expected)));
+                );
+            };
+            assert_eq!(value, Bytes::from(&$argument[..]));
         };
     }
 
     #[tokio::test]
-    async fn read_array_request() -> Result<(), RespError> {
-        let mut messages = request_messages!(b"*2\r\n$1\r\nx\r\n$2\r\nab\r\n*1\r\n$1\r\nz\r\n");
-        assert_argument!(messages, b"x");
-        assert_argument!(messages, b"ab");
-        assert_ready!(messages);
-        assert_argument!(messages, b"z");
-        assert_ready!(messages);
-        assert_none!(messages);
-        assert_none!(messages);
-
+    async fn read_array_requests() -> Result<(), RespError> {
+        assert_requests!(
+            RespConfig::default(),
+            b"*2\r\n$1\r\nx\r\n$2\r\nab\r\n*1\r\n$1\r\nz\r\n",
+            b"x",
+            b"ab",
+            end,
+            b"z",
+            end
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn read_inline_request() -> Result<(), RespError> {
-        let mut messages = request_messages!(b"foo bar\r\nbaz bam\r\n");
-        assert_argument!(messages, b"foo");
-        assert_argument!(messages, b"bar");
-        assert_ready!(messages);
-        assert_argument!(messages, b"baz");
-        assert_argument!(messages, b"bam");
-        assert_ready!(messages);
-        assert_none!(messages);
-        assert_none!(messages);
+        assert_requests!(
+            RespConfig::default(),
+            b"foo bar\r\nbaz bam\r\n",
+            b"foo",
+            b"bar",
+            end,
+            b"baz",
+            b"bam",
+            end
+        );
 
         Ok(())
     }
 
     #[tokio::test]
     async fn read_invalid_argument() -> Result<(), RespError> {
-        let mut messages = request_messages!(b"foo 'bar\r\nbaz bam\r\nfoo\r\n");
-        assert_invalid_argument!(messages);
-        assert_argument!(messages, b"baz");
-        assert_argument!(messages, b"bam");
-        assert_ready!(messages);
-        assert_argument!(messages, b"foo");
-        assert_ready!(messages);
-        assert_none!(messages);
-        assert_none!(messages);
+        assert_requests!(
+            RespConfig::default(),
+            b"foo 'bar\r\nbaz bam\r\nfoo\r\n",
+            invalid,
+            b"baz",
+            b"bam",
+            end,
+            b"foo",
+            end
+        );
 
         Ok(())
     }
 
     #[tokio::test]
     async fn read_invalid_blob_string() -> Result<(), RespError> {
-        let mut messages = request_messages!(b"*2\r\n$1\r\nx\r\n$invalid\r\nasdf\r\n");
-        assert_argument!(messages, b"x");
-        assert_error!(messages, RespError::InvalidBlobLength);
+        assert_requests!(
+            RespConfig::default(),
+            b"*2\r\n$1\r\nx\r\n$invalid\r\nasdf\r\n",
+            b"x",
+            (error RespError::InvalidBlobLength)
+        );
 
         Ok(())
     }
 
     #[tokio::test]
     async fn read_invalid_end_of_input() -> Result<(), RespError> {
-        let mut messages = request_messages!(b"*2\r\n$1\r\nx\r\n$1\r\ny");
-        assert_argument!(messages, b"x");
-        assert_error!(messages, RespError::EndOfInput);
+        assert_requests!(
+            RespConfig::default(),
+            b"*2\r\n$1\r\nx\r\n$1\r\ny",
+            b"x",
+            (error RespError::EndOfInput)
+        );
 
         Ok(())
     }
@@ -1059,9 +1078,12 @@ mod tests {
     async fn read_too_long_blob_string() -> Result<(), RespError> {
         let mut config = RespConfig::default();
         config.set_blob_limit(5);
-        let mut messages = request_messages!(b"*2\r\n$1\r\nx\r\n$10\r\n1234567890\r\n", config);
-        assert_argument!(messages, b"x");
-        assert_error!(messages, RespError::InvalidBlobLength);
+        assert_requests!(
+            config,
+            b"*2\r\n$1\r\nx\r\n$10\r\n1234567890\r\n",
+            b"x",
+            (error RespError::InvalidBlobLength)
+        );
 
         Ok(())
     }
@@ -1070,8 +1092,11 @@ mod tests {
     async fn read_too_long_inline() -> Result<(), RespError> {
         let mut config = RespConfig::default();
         config.set_inline_limit(5);
-        let mut messages = request_messages!(b"1234567890\r\n", config);
-        assert_error!(messages, RespError::TooBigInline);
+        assert_requests!(
+            config,
+            b"1234567890\r\n",
+            (error RespError::TooBigInline)
+        );
 
         Ok(())
     }
