@@ -492,15 +492,16 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
         Ok(())
     }
 
-    /// Read an entire line.
-    async fn read_line(&mut self) -> Result<Bytes, RespError> {
+    async fn require_line(&mut self) -> Result<BytesMut, RespError> {
         let mut from = 0;
-        let slice = loop {
+        loop {
             let to = cmp::min(self.config.inline_limit(), self.buffer.len());
             let index = self.buffer[from..to].iter().position(|&b| b == b'\r');
 
             if let Some(index) = index {
-                break self.buffer.split_to(from + index);
+                let line = self.buffer.split_to(from + index);
+                self.require("\r\n").await?;
+                return Ok(line);
             }
 
             if self.buffer.len() > self.config.inline_limit() {
@@ -509,10 +510,12 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
 
             from = self.buffer.len();
             self.read_some().await?;
-        };
+        }
+    }
 
-        self.require("\r\n").await?;
-        Ok(slice.freeze())
+    /// Read an entire line.
+    async fn read_line(&mut self) -> Result<Bytes, RespError> {
+        Ok(self.require_line().await?.freeze())
     }
 
     /// Read an exact number of bytes.
