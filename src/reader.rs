@@ -1,9 +1,9 @@
-use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, Splitter};
+use crate::{RespConfig, RespError, RespFrame, RespRequest, RespValue, split};
 use bytes::{Buf, Bytes, BytesMut};
 use futures::stream::{BoxStream, StreamExt, unfold};
 use std::{
     cmp,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     marker::Unpin,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -40,11 +40,11 @@ pub struct RespReader<Inner: AsyncRead + Unpin + Send + 'static> {
     /// The inner `AsyncRead`.
     inner: Inner,
 
-    /// A `Splitter` for splitting arguments.
-    splitter: Splitter,
-
     /// The current request state.
     request_state: RequestState,
+
+    /// Arguments from an inline request.
+    arguments: VecDeque<Bytes>,
 }
 
 impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
@@ -54,8 +54,8 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
             buffer: BytesMut::default(),
             config,
             inner,
-            splitter: Splitter::default(),
             request_state: RequestState::Init,
+            arguments: VecDeque::default(),
         }
     }
 
@@ -106,8 +106,8 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
                         continue;
                     }
 
-                    let line = self.read_line().await?;
-                    if self.splitter.split(&line[..]) {
+                    let line = self.require_line().await?;
+                    if split(line, &mut self.arguments) {
                         self.request_state = Splitting;
                         continue;
                     }
@@ -115,7 +115,7 @@ impl<Inner: AsyncRead + Unpin + Send + 'static> RespReader<Inner> {
                     return Ok(Some(RespRequest::InvalidArgument));
                 }
                 Splitting => {
-                    if let Some(argument) = self.splitter.next() {
+                    if let Some(argument) = self.arguments.pop_front() {
                         return Ok(Some(argument.into()));
                     }
                     self.request_state = Init;
